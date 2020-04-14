@@ -8,7 +8,9 @@ describe('Tasks controller', () => {
   let db;
   let LiveList;
   let RulesEngine;
+  let Telemetry;
   let Tour;
+  let Debounce;
 
   beforeEach(async () => {
     Changes = sinon.stub();
@@ -19,6 +21,12 @@ describe('Tasks controller', () => {
 
     Tour = sinon.stub();
     db = { get: sinon.stub().resolves({}) };
+    Telemetry = { record: sinon.stub() };
+    Debounce = sinon.stub().callsFake(() => {
+      const debounced = sinon.stub();
+      debounced.cancel = sinon.stub();
+      return debounced;
+    });
 
     module('inboxApp');
     module($provide => {
@@ -26,6 +34,8 @@ describe('Tasks controller', () => {
       $provide.factory('DB', KarmaUtils.mockDB(db));
       $provide.value('RulesEngine', RulesEngine);
       $provide.value('Tour', Tour);
+      $provide.value('Telemetry', Telemetry);
+      $provide.value('Debounce', Debounce);
     });
 
     inject((_$rootScope_, _$ngRedux_, _LiveList_, _LiveListConfig_, $controller) => {
@@ -38,7 +48,7 @@ describe('Tasks controller', () => {
       LiveList = _LiveList_;
 
       _LiveListConfig_($scope);
-      
+
       getService = () => {
         const result = $controller('TasksCtrl', {
           $log: { error: () => {}},
@@ -49,10 +59,11 @@ describe('Tasks controller', () => {
           LiveList,
           LiveListConfig: _LiveListConfig_,
           RulesEngine,
+          Telemetry,
           Tour,
         });
         sinon.stub(result, 'setSelectedTask');
-        
+
         return result;
       };
     });
@@ -117,6 +128,7 @@ describe('Tasks controller', () => {
     expect(service.tasksDisabled).to.be.false;
     expect(service.hasTasks).to.be.true;
     expect(!!service.error).to.be.false;
+    console.log(JSON.stringify(LiveList.tasks.set.args, null, 2));
     expect(LiveList.tasks.set.args).to.deep.eq([[[{ _id: 'e1' }, { _id: 'e2' }]]]);
   });
 
@@ -149,4 +161,34 @@ describe('Tasks controller', () => {
 
     expect(changesFeed.filter({ id: 'foo', doc: { _id: 'a', type: 'data_record', form: undefined }})).to.be.false;
   });
+
+  it('should record telemetry on initial load', async () => {
+    await new Promise(resolve => {
+      sinon.stub(LiveList.tasks, 'set').callsFake(resolve);
+      getService();
+    });
+
+    expect(RulesEngine.fetchTaskDocsForAllContacts.callCount).to.eq(1);
+    expect(Telemetry.record.callCount).to.equal(1);
+    expect(Telemetry.record.args[0][0]).to.equal('tasks:load');
+  });
+
+  it('should should record telemetry on refresh', async () => {
+    await new Promise(resolve => {
+      sinon.stub(LiveList.tasks, 'set').callsFake(resolve);
+      getService();
+    });
+
+    const changesArgs = Changes.args[0][0];
+    const change = { doc: { type: 'task' } };
+    changesArgs.callback(change);
+    const refresh = Debounce.args[0][0];
+    await refresh();
+
+    expect(RulesEngine.fetchTaskDocsForAllContacts.callCount).to.eq(2);
+    expect(Telemetry.record.callCount).to.equal(2);
+    expect(Telemetry.record.args[0][0]).to.equal('tasks:load');
+    expect(Telemetry.record.args[1][0]).to.equal('tasks:refresh');
+  });
+
 });
