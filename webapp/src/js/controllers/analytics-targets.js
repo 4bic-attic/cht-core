@@ -1,5 +1,6 @@
 angular.module('inboxControllers').controller('AnalyticsTargetsCtrl', function (
   $log,
+  $timeout,
   RulesEngine
 ) {
 
@@ -22,8 +23,10 @@ angular.module('inboxControllers').controller('AnalyticsTargetsCtrl', function (
       return [];
     })
     .then(targets => {
-      ctrl.loading = false;
-      ctrl.targets = targets;
+      $timeout(() => {
+        ctrl.loading = false;
+        ctrl.targets = targets;
+      });
     });
 }
 );
